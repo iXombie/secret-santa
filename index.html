@@ -47,19 +47,47 @@
  <g id="yetiArm"><path d="M-47 -51q-24 -7 -43 14l-29 29q-9 15 3 26q13 13 27 -1l39 -29q14 -13 3 -39Z" fill="#e8f2f3" stroke="#6d97aa" stroke-width="3"/><path d="M-119 -9q-18 0 -19 13l6 20q13 11 27 0l9 -12 -6 -13Z" fill="#86b9cb" stroke="#587f94" stroke-width="3"/><path d="M-129 3l4 12m4 -15 5 12" stroke="#587f94" stroke-width="2" stroke-linecap="round"/></g>
  </g></g></g>
 </svg></div>
-<section class="panel" id="entry"><form id="form"><label for="code">Enter the last four digits of your phone number</label><input id="code" type="text" inputmode="numeric" autocomplete="off" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required aria-describedby="error"><button id="submit" type="submit">🎁 &nbsp; Open my Christmas delivery</button><p id="error" role="alert" aria-live="polite"></p></form><p class="small">Your assignment is a secret. Make sure no one is looking over your shoulder!</p></section>
+<section class="panel" id="entry"><form id="form"><label for="code">Enter the last four digits of your phone number</label><input id="code" type="text" inputmode="numeric" autocomplete="off" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required aria-describedby="error"><button id="submit" type="submit">🎁 &nbsp; Open my Christmas delivery</button><p id="error" role="alert" aria-live="polite"></p></form><p class="small" id="lockNote" hidden>This browser is reserved for your Secret Santa delivery. You can replay it with your own code.</p><p class="small">Your assignment is a secret. Make sure no one is looking over your shoulder!</p></section>
 <section class="panel" id="delivery" hidden><p id="status" role="status">Santa is on his way…</p><button class="secondary" id="skip">Skip animation</button></section>
-<section class="panel" id="result" hidden><p id="greeting"></p><p>You’re buying a gift for…</p><h2 id="recipient" tabindex="-1"></h2><p>Keep it a secret until Christmas!</p><button class="secondary" id="again">Close my delivery</button></section>
+<section class="panel" id="result" hidden><p id="greeting"></p><p>You’re buying a gift for…</p><h2 id="recipient" tabindex="-1"></h2><p>Keep it a secret until Christmas!</p><div class="countdown" id="countdown" role="timer" aria-label="Seconds until the snowman arrives"><span id="countdownLabel">Snowman incoming in</span><strong id="countdownNumber">5</strong></div></section>
 <footer>Made with Christmas magic</footer></main>
 <script>
 'use strict';
 const salt='kpxiag4i3RDgjSbXqCLu0g==', records=[{"iv":"RdTXuKsaAmkTP/eV","data":"JMeDGkeOJLBlv5oJq9bLTi9DywOvLt94QShxbikyf5409nMT+Gw8/Szp+5bWquvq/3p+nRJBG84VCX0="},{"iv":"UUdJOyx70aKKrWFR","data":"eakV7ws7bVu8Iqe1o/yqhYnLZ9luz96aU5YmXqrhRLc7a77Vefr1ibgN5oU7nuGjdlpd87TNFmqaVg=="},{"iv":"F04Rr+KH26D/vhX7","data":"TtmOkBtBi8Cd+HzSaBL3KVqfbU8ZvEDahDV6vOC4n5H34atgtAVcq7KQTVL/GPmTl4oqiCgHBQjvjKaC3g=="},{"iv":"aHYbw4qedf6HQGtL","data":"ohFlFXCQB8Sube6OuSF4NQSvfvQROekC+C4hbkJQs1ghHGloszk7TQC7Mv7ICOfiAgM+1KGOIpg="},{"iv":"naJO+zXZOpzG/44/","data":"wWZk29WkCDhM5dK0FRUN1wOG5Nwyq79hkjWw5SFCAN2qOGzWlLikgI5pIMQdqsIKqoRZ7QjB"}];
-const $=id=>document.getElementById(id);const bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));let pending=null,timer=null,ambushTimer=null,impactTimer=null,resetTimer=null,busy=false;
+const $=id=>document.getElementById(id);const bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));let pending=null,timer=null,ambushTimer=null,impactTimer=null,resetTimer=null,countdownTimer=null,busy=false;
 async function lookup(code){const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(code),'PBKDF2',false,['deriveKey']);const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:bytes(salt),iterations:200000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);for(const record of records){try{const data=await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(record.iv)},key,bytes(record.data));return JSON.parse(new TextDecoder().decode(data))}catch{}}return null}
-function finish(){if(!pending||!$('result').hidden)return;clearTimeout(timer);timer=null;$('scene').classList.add('playing');$('scene').classList.add('finished');$('delivery').hidden=true;$('result').hidden=false;$('greeting').textContent='Merry Christmas, '+pending.giver+'!';$('recipient').textContent=pending.recipient;$('recipient').focus();ambushTimer=setTimeout(startAmbush,5000);}
+// A local browser lock, not a device fingerprint or server-side authentication.
+const lockKey='santas-secret-delivery:browser-lock:v1';
+const lockMessage='This browser already belongs to another Secret Santa delivery. Please use your own device.';
+async function codeMarker(code){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('santa-browser-lock:'+salt+':'+code));return Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')}
+function readLock(){try{return localStorage.getItem(lockKey)}catch{throw Error('browser-lock-storage')}}
+function updateLockNote(){try{$('lockNote').hidden=!readLock()}catch{$('lockNote').hidden=true}}
+async function claimDelivery(code){
+ const marker=await codeMarker(code);
+ const claim=async()=>{
+  let previous=readLock();if(previous&&previous!==marker)return {blocked:true};
+  const data=await lookup(code);if(!data)return {data:null};
+  previous=readLock();if(previous&&previous!==marker)return {blocked:true};
+  try{localStorage.setItem(lockKey,marker);if(localStorage.getItem(lockKey)!==marker)throw Error()}catch{throw Error('browser-lock-storage')}
+  updateLockNote();return {data};
+ };
+ return navigator.locks?await navigator.locks.request(lockKey,claim):await claim();
+}
+updateLockNote();window.addEventListener('storage',e=>{if(e.key===lockKey||e.key===null)updateLockNote()});
+
+function finish(){if(!pending||!$('result').hidden)return;clearTimeout(timer);timer=null;$('scene').classList.add('playing');$('scene').classList.add('finished');$('delivery').hidden=true;$('result').hidden=false;$('greeting').textContent='Merry Christmas, '+pending.giver+'!';$('recipient').textContent=pending.recipient;$('recipient').focus();startCountdown();}
 $('code').addEventListener('input',()=>{$('code').value=$('code').value.replace(/[^0-9]/g,'').slice(0,4);$('error').textContent='' });
-$('form').addEventListener('submit',async e=>{e.preventDefault();if(busy)return;const code=$('code').value;if(!/^\d{4}$/.test(code)){$('error').textContent='Enter exactly four digits.';return}busy=true;$('submit').disabled=true;$('error').textContent='Checking Santa’s list…';try{if(!crypto.subtle)throw Error('secure context required');const data=await lookup(code);if(!data){$('error').textContent='Santa couldn’t find that code. Please try again.';return}pending=data;$('code').value='';$('error').textContent='';$('giftName').textContent=data.recipient;$('entry').hidden=true;$('delivery').hidden=false;$('scene').classList.remove('finished');$('scene').classList.add('playing');timer=setTimeout(finish,matchMedia('(prefers-reduced-motion: reduce)').matches?50:4400)}catch{$('error').textContent='Unable to open the delivery. Please use an up-to-date browser over HTTPS.'}finally{busy=false;$('submit').disabled=false}});
+$('form').addEventListener('submit',async e=>{e.preventDefault();if(busy)return;const code=$('code').value;if(!/^\d{4}$/.test(code)){$('error').textContent='Enter exactly four digits.';return}busy=true;$('submit').disabled=true;$('error').textContent='Checking Santa’s list…';try{if(!crypto.subtle)throw Error('secure context required');const claim=await claimDelivery(code);if(claim.blocked){$('error').textContent=lockMessage;return}const data=claim.data;if(!data){$('error').textContent='Santa couldn’t find that code. Please try again.';return}pending=data;$('code').value='';$('error').textContent='';$('giftName').textContent=data.recipient;$('entry').hidden=true;$('delivery').hidden=false;$('scene').classList.remove('finished');$('scene').classList.add('playing');timer=setTimeout(finish,matchMedia('(prefers-reduced-motion: reduce)').matches?50:4400)}catch(err){$('error').textContent=err.message==='browser-lock-storage'?'Santa needs browser storage to protect your delivery. Enable site storage and try again.':'Unable to open the delivery. Please use an up-to-date browser over HTTPS.'}finally{busy=false;$('submit').disabled=false}});
+function startCountdown(){
+ clearInterval(countdownTimer);
+ const deadline=performance.now()+5000;
+ $('countdownLabel').textContent='Snowman incoming in';$('countdownNumber').textContent='5';
+ countdownTimer=setInterval(()=>{const seconds=Math.max(0,Math.ceil((deadline-performance.now())/1000));$('countdownNumber').textContent=String(seconds);},100);
+ ambushTimer=setTimeout(startAmbush,5000);
+}
 function resetDelivery(){
+ clearInterval(countdownTimer);countdownTimer=null;
+ $('countdownLabel').textContent='Snowman incoming in';$('countdownNumber').textContent='5';
  for(const id of [timer,ambushTimer,impactTimer,resetTimer])clearTimeout(id);
  timer=ambushTimer=impactTimer=resetTimer=null;pending=null;
  $('scene').classList.remove('playing','finished','ambush');
@@ -69,14 +97,18 @@ function resetDelivery(){
 }
 function startAmbush(){
  if(!pending)return;
+ clearInterval(countdownTimer);countdownTimer=null;
+ $('countdownLabel').textContent='Watch out!';$('countdownNumber').textContent='❄';
  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
  $('scene').classList.add('ambush');
  const impact=()=>{$('giftName').textContent='';$('recipient').textContent='';$('greeting').textContent='';$('result').hidden=true;$('delivery').hidden=false;$('skip').hidden=true;$('status').textContent='Oh no! The Abominable Snowman smashed your present!';};
  impactTimer=setTimeout(impact,reduced?0:1650);
  resetTimer=setTimeout(resetDelivery,reduced?1500:2800);
 }
-$('skip').onclick=finish;$('again').onclick=resetDelivery;
-</script><style>.finished #sleigh{animation:none;opacity:0}.finished #bag{animation:none;opacity:1;transform:translate(0,218px)}.finished #gift,.finished #sparkles{animation:none;opacity:1;transform:none}
+$('skip').onclick=finish;
+</script><style>
+.countdown{margin:18px auto 0;padding:12px 18px;border:1px solid #d7bc7966;border-radius:12px;background:#122e40;display:flex;align-items:center;justify-content:center;gap:14px;color:var(--gold);font-weight:600}.countdown strong{font:700 30px/1 Georgia,serif;min-width:32px;font-variant-numeric:tabular-nums;text-align:center}
+.finished #sleigh{animation:none;opacity:0}.finished #bag{animation:none;opacity:1;transform:translate(0,218px)}.finished #gift,.finished #sparkles{animation:none;opacity:1;transform:none}
 /* Five-second reveal, then a playful Yeti ambush. */
 #yeti,#wreckage,#impact{opacity:0;pointer-events:none}
 #yetiArm{transform-origin:-47px -51px} /* origin corrected in local group by transform-box */
